@@ -60,11 +60,6 @@ public class SearchResultsSummary extends InstrumentedFragment {
     private SearchResultsAdapter mResultsAdapter;
     private UpdateSearchResultsTask mUpdateSearchResultsTask;
 
-    private ListView mSuggestionsListView;
-    private SuggestionsAdapter mSuggestionsAdapter;
-    private UpdateSuggestionsTask mUpdateSuggestionsTask;
-
-    private ViewGroup mLayoutSuggestions;
     private ViewGroup mLayoutResults;
 
     private String mQuery;
@@ -93,32 +88,11 @@ public class SearchResultsSummary extends InstrumentedFragment {
         }
     }
 
-    /**
-     * A basic AsyncTask for updating the suggestions cursor
-     */
-    private class UpdateSuggestionsTask extends AsyncTask<String, Void, Cursor> {
-        @Override
-        protected Cursor doInBackground(String... params) {
-            return Index.getInstance(getActivity()).getSuggestions(params[0]);
-        }
-
-        @Override
-        protected void onPostExecute(Cursor cursor) {
-            if (!isCancelled()) {
-                setSuggestionsCursor(cursor);
-                setSuggestionsVisibility(cursor.getCount() > 0);
-            } else if (cursor != null) {
-                cursor.close();
-            }
-        }
-    }
-
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         mResultsAdapter = new SearchResultsAdapter(getActivity());
-        mSuggestionsAdapter = new SuggestionsAdapter(getActivity());
 
         if (savedInstanceState != null) {
             mShowResults = savedInstanceState.getBoolean(SAVE_KEY_SHOW_RESULTS);
@@ -135,8 +109,6 @@ public class SearchResultsSummary extends InstrumentedFragment {
     @Override
     public void onStop() {
         super.onStop();
-
-        clearSuggestions();
         clearResults();
     }
 
@@ -145,10 +117,6 @@ public class SearchResultsSummary extends InstrumentedFragment {
         mResultsListView = null;
         mResultsAdapter = null;
         mUpdateSearchResultsTask = null;
-
-        mSuggestionsListView = null;
-        mSuggestionsAdapter = null;
-        mUpdateSuggestionsTask = null;
 
         mSearchView = null;
 
@@ -161,7 +129,6 @@ public class SearchResultsSummary extends InstrumentedFragment {
 
         final View view = inflater.inflate(R.layout.search_panel, container, false);
 
-        mLayoutSuggestions = (ViewGroup) view.findViewById(R.id.layout_suggestions);
         mLayoutResults = (ViewGroup) view.findViewById(R.id.layout_results);
 
         mResultsListView = (ListView) view.findViewById(R.id.list_results);
@@ -219,33 +186,6 @@ public class SearchResultsSummary extends InstrumentedFragment {
                         R.layout.search_panel_results_header, mResultsListView, false),
                 null, false);
 
-        mSuggestionsListView = (ListView) view.findViewById(R.id.list_suggestions);
-        mSuggestionsListView.setAdapter(mSuggestionsAdapter);
-        mSuggestionsListView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            @Override
-            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                // We have a header, so we need to decrement the position by one
-                position--;
-                // Some Monkeys could create a case where they were probably clicking on the
-                // List Header and thus the position passed was "0" and then by decrement was "-1"
-                if (position < 0) {
-                    return;
-                }
-                final Cursor cursor = mSuggestionsAdapter.mCursor;
-                cursor.moveToPosition(position);
-
-                mShowResults = true;
-                mQuery = cursor.getString(0);
-                if (mSearchView != null) {
-                    mSearchView.setQuery(mQuery, false);
-                }
-            }
-        });
-        mSuggestionsListView.addHeaderView(
-                LayoutInflater.from(getActivity()).inflate(
-                        R.layout.search_panel_suggestions_header, mSuggestionsListView, false),
-                null, false);
-
         return view;
     }
 
@@ -254,23 +194,9 @@ public class SearchResultsSummary extends InstrumentedFragment {
         return MetricsLogger.DASHBOARD_SEARCH_RESULTS;
     }
 
-    @Override
-    public void onResume() {
-        super.onResume();
-
-        if (!mShowResults) {
-            showSomeSuggestions();
-        }
-    }
 
     public void setSearchView(SearchView searchView) {
         mSearchView = searchView;
-    }
-
-    private void setSuggestionsVisibility(boolean visible) {
-        if (mLayoutSuggestions != null) {
-            mLayoutSuggestions.setVisibility(visible ? View.VISIBLE : View.GONE);
-        }
     }
 
     private void setResultsVisibility(boolean visible) {
@@ -286,7 +212,6 @@ public class SearchResultsSummary extends InstrumentedFragment {
     public boolean onQueryTextSubmit(String query) {
         mQuery = getFilteredQueryString(query);
         mShowResults = true;
-        setSuggestionsVisibility(false);
         updateSearchResults();
         saveQueryToDatabase();
 
@@ -298,41 +223,12 @@ public class SearchResultsSummary extends InstrumentedFragment {
 
         mQuery = newQuery;
 
-        if (TextUtils.isEmpty(mQuery)) {
-            mShowResults = false;
-            setResultsVisibility(false);
-            updateSuggestions();
-        } else {
+        if (!TextUtils.isEmpty(mQuery)) {
             mShowResults = true;
-            setSuggestionsVisibility(false);
             updateSearchResults();
         }
 
         return true;
-    }
-
-    public void showSomeSuggestions() {
-        setResultsVisibility(false);
-        mQuery = EMPTY_QUERY;
-        updateSuggestions();
-    }
-
-    private void clearSuggestions() {
-        if (mUpdateSuggestionsTask != null) {
-            mUpdateSuggestionsTask.cancel(false);
-            mUpdateSuggestionsTask = null;
-        }
-        setSuggestionsCursor(null);
-    }
-
-    private void setSuggestionsCursor(Cursor cursor) {
-        if (mSuggestionsAdapter == null) {
-            return;
-        }
-        Cursor oldCursor = mSuggestionsAdapter.swapCursor(cursor);
-        if (oldCursor != null) {
-            oldCursor.close();
-        }
     }
 
     private void clearResults() {
@@ -373,20 +269,6 @@ public class SearchResultsSummary extends InstrumentedFragment {
             mUpdateSearchResultsTask.cancel(false);
             mUpdateSearchResultsTask = null;
         }
-        if (mUpdateSuggestionsTask != null) {
-            mUpdateSuggestionsTask.cancel(false);
-            mUpdateSuggestionsTask = null;
-        }
-    }
-
-    private void updateSuggestions() {
-        clearAllTasks();
-        if (mQuery == null) {
-            setSuggestionsCursor(null);
-        } else {
-            mUpdateSuggestionsTask = new UpdateSuggestionsTask();
-            mUpdateSuggestionsTask.execute(mQuery);
-        }
     }
 
     private void updateSearchResults() {
@@ -397,94 +279,6 @@ public class SearchResultsSummary extends InstrumentedFragment {
         } else {
             mUpdateSearchResultsTask = new UpdateSearchResultsTask();
             mUpdateSearchResultsTask.execute(mQuery);
-        }
-    }
-
-    private static class SuggestionItem {
-        public String query;
-
-        public SuggestionItem(String query) {
-            this.query = query;
-        }
-    }
-
-    private static class SuggestionsAdapter extends BaseAdapter {
-
-        private static final int COLUMN_SUGGESTION_QUERY = 0;
-        private static final int COLUMN_SUGGESTION_TIMESTAMP = 1;
-
-        private Context mContext;
-        private Cursor mCursor;
-        private LayoutInflater mInflater;
-        private boolean mDataValid = false;
-
-        public SuggestionsAdapter(Context context) {
-            mContext = context;
-            mInflater = (LayoutInflater) mContext.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
-            mDataValid = false;
-        }
-
-        public Cursor swapCursor(Cursor newCursor) {
-            if (newCursor == mCursor) {
-                return null;
-            }
-            Cursor oldCursor = mCursor;
-            mCursor = newCursor;
-            if (newCursor != null) {
-                mDataValid = true;
-                notifyDataSetChanged();
-            } else {
-                mDataValid = false;
-                notifyDataSetInvalidated();
-            }
-            return oldCursor;
-        }
-
-        @Override
-        public int getCount() {
-            if (!mDataValid || mCursor == null || mCursor.isClosed()) return 0;
-            return mCursor.getCount();
-        }
-
-        @Override
-        public Object getItem(int position) {
-            if (mDataValid && mCursor.moveToPosition(position)) {
-                final String query = mCursor.getString(COLUMN_SUGGESTION_QUERY);
-
-                return new SuggestionItem(query);
-            }
-            return null;
-        }
-
-        @Override
-        public long getItemId(int position) {
-            return 0;
-        }
-
-        @Override
-        public View getView(int position, View convertView, ViewGroup parent) {
-            if (!mDataValid && convertView == null) {
-                throw new IllegalStateException(
-                        "this should only be called when the cursor is valid");
-            }
-            if (!mCursor.moveToPosition(position)) {
-                throw new IllegalStateException("couldn't move cursor to position " + position);
-            }
-
-            View view;
-
-            if (convertView == null) {
-                view = mInflater.inflate(R.layout.search_suggestion_item, parent, false);
-            } else {
-                view = convertView;
-            }
-
-            TextView query = (TextView) view.findViewById(R.id.title);
-
-            SuggestionItem item = (SuggestionItem) getItem(position);
-            query.setText(item.query);
-
-            return view;
         }
     }
 
